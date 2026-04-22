@@ -76,6 +76,21 @@ app.get('/', (req, res) => {
     });
 });
 
+// ============================================================
+// Self-Ping ป้องกัน Render Free Tier หลับ (ทุก 14 นาที)
+// ============================================================
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+if (RENDER_URL) {
+    const https = require('https');
+    setInterval(() => {
+        https.get(RENDER_URL, (res) => {
+            console.log(`🔔 Self-ping: ${res.statusCode}`);
+        }).on('error', (e) => {
+            console.warn('⚠️ Self-ping failed:', e.message);
+        });
+    }, 14 * 60 * 1000);
+}
+
 app.listen(PORT, () => {
     console.log('');
     console.log('╔══════════════════════════════════════╗');

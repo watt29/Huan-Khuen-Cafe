@@ -1,59 +1,37 @@
 // ========================================================
 //  services/database.js — จัดการ SQLite Memory
-//  (โครงสร้างเดียวกับ Sentinel-Thailand-OSINT)
 // ========================================================
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 const path = require('path');
-
-const dbPath = path.join(__dirname, '../data/intelligence_memory.db');
-
-// สร้างโฟลเดอร์ data ถ้ายังไม่มี
 const fs = require('fs');
-if (!fs.existsSync(path.join(__dirname, '../data'))) {
-    fs.mkdirSync(path.join(__dirname, '../data'));
-}
 
-const db = new sqlite3.Database(dbPath);
+const dataDir = path.join(__dirname, '../data');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-db.serialize(() => {
-    // ตารางเก็บประวัติการตอบ (ป้องกันการตอบซ้ำ)
-    db.run(`
-        CREATE TABLE IF NOT EXISTS interactions (
-            id TEXT PRIMARY KEY, 
-            type TEXT, 
-            content TEXT, 
-            sentiment TEXT DEFAULT 'NORMAL',
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+const db = new Database(path.join(dataDir, 'intelligence_memory.db'));
 
-    // ตารางเก็บ Log การทำงาน
-    db.run(`
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action TEXT,
-            details TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-});
+db.exec(`
+    CREATE TABLE IF NOT EXISTS interactions (
+        id TEXT PRIMARY KEY,
+        type TEXT,
+        content TEXT,
+        sentiment TEXT DEFAULT 'NORMAL',
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT,
+        details TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+`);
 
 function query(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-        });
-    });
+    return Promise.resolve(db.prepare(sql).all(...params));
 }
 
 function run(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function(err) {
-            if (err) reject(err);
-            else resolve(this);
-        });
-    });
+    return Promise.resolve(db.prepare(sql).run(...params));
 }
 
 module.exports = { db, query, run };
