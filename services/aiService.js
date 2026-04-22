@@ -108,19 +108,22 @@ ${SYSTEM_PROMPT}
     // --- Engine 2: Gemini (Fallback) ---
     try {
         const ai = getGeminiClient();
-        const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+        const geminiModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
 
         for (const modelName of geminiModels) {
             try {
-                const response = await ai.models.generateContent({
+                const model = ai.getGenerativeModel({ 
                     model: modelName,
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
                     generationConfig: {
-                        maxOutputTokens: 200,
+                        maxOutputTokens: 500,
                         responseMimeType: 'application/json'
                     }
                 });
+                
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
                 const res = JSON.parse(response.text());
+                
                 return {
                     reply: res.reply || 'น้องกาลเวลาพร้อมดูแลค่ะ รับเมนูไหนดีคะ?',
                     sentiment: res.sentiment || 'NORMAL'
