@@ -8,6 +8,7 @@
 // ========================================================
 require('dotenv').config();
 const express = require('express');
+const axios = require('axios');
 const { handleMessage } = require('./handlers/messageHandler');
 const { handleComment } = require('./handlers/commentHandler');
 
@@ -77,18 +78,38 @@ app.get('/', (req, res) => {
 });
 
 // ============================================================
-// Self-Ping ป้องกัน Render Free Tier หลับ (ทุก 14 นาที)
+// Self-Ping ป้องกัน Render Free Tier หลับ (ทุก 10 นาที)
 // ============================================================
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
-if (RENDER_URL) {
-    const https = require('https');
-    setInterval(() => {
-        https.get(RENDER_URL, (res) => {
-            console.log(`🔔 Self-ping: ${res.statusCode}`);
-        }).on('error', (e) => {
-            console.warn('⚠️ Self-ping failed:', e.message);
-        });
-    }, 14 * 60 * 1000);
+
+if (RENDER_URL && RENDER_URL !== 'https://YOUR-SERVICE-NAME.onrender.com') {
+    async function selfPing(retryCount = 0) {
+        const pingUrl = RENDER_URL.endsWith('/') ? RENDER_URL : RENDER_URL + '/';
+        const timestamp = new Date().toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' });
+
+        try {
+            const response = await axios.get(pingUrl, { timeout: 30000 });
+            console.log(`🔔 Self-ping OK: ${response.status} — ${timestamp}`);
+        } catch (error) {
+            console.warn(`⚠️ Self-ping failed (${error.code || error.message}) — ${timestamp}`);
+            
+            // ถ้าเฟล ให้ลองใหม่สูงสุด 3 ครั้ง (เว้นระยะ 2 นาที)
+            if (retryCount < 3) {
+                const nextRetry = 2 * 60 * 1000;
+                console.log(`🔄 จะลองใหม่ใน 2 นาที (ครั้งที่ ${retryCount + 1}/3)`);
+                setTimeout(() => selfPing(retryCount + 1), nextRetry);
+            }
+        }
+    }
+
+    // เริ่ม Ping ครั้งแรกหลังจาก Start 1 นาที
+    setTimeout(selfPing, 60 * 1000);
+    
+    // ตั้งเวลา Ping ทุก 10 นาที
+    setInterval(selfPing, 10 * 60 * 1000);
+    console.log(`🔁 Self-ping ระบบเปิดใช้งาน → ${RENDER_URL} (ทุก 10 นาที)`);
+} else {
+    console.warn('⚠️ RENDER_EXTERNAL_URL ยังไม่ได้ตั้งค่า หรือยังเป็นค่าเริ่มต้น — Server จะหลับบน Render!');
 }
 
 app.listen(PORT, () => {

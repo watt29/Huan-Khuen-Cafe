@@ -39,7 +39,9 @@ async function sendTypingIndicator(recipientId, state = 'typing_on') {
 
 // --- ดึงข้อมูลชื่อลูกค้า ---
 async function getUserProfile(userId) {
+    if (!userId) return null;
     try {
+        // ลองดึงแบบละเอียดก่อน
         const response = await axios.get(`${FB_API}/${userId}`, {
             params: {
                 fields: 'first_name,last_name,profile_pic',
@@ -48,7 +50,25 @@ async function getUserProfile(userId) {
         });
         return response.data;
     } catch (err) {
-        console.warn('⚠️ ไม่สามารถดึง Profile ได้');
+        // ถ้าพลาด (อาจเพราะ permission) ลองดึงแค่ name อย่างเดียว
+        try {
+            const fallback = await axios.get(`${FB_API}/${userId}`, {
+                params: {
+                    fields: 'name',
+                    access_token: PAGE_TOKEN
+                }
+            });
+            if (fallback.data && fallback.data.name) {
+                const names = fallback.data.name.split(' ');
+                return {
+                    first_name: names[0],
+                    last_name: names.slice(1).join(' ') || '',
+                    ...fallback.data
+                };
+            }
+        } catch (err2) {
+            console.warn('⚠️ ไม่สามารถดึง Profile ได้ (ทั้งแบบเต็มและ fallback):', err2.response?.data || err2.message);
+        }
         return null;
     }
 }
