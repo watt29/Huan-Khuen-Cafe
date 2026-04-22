@@ -86,7 +86,7 @@ ${SYSTEM_PROMPT}
                 })),
                 { role: 'user', content: prompt }
             ],
-            model: 'llama-3.1-70b-versatile',
+            model: 'llama-3.3-70b-versatile',
             response_format: { type: 'json_object' },
             max_tokens: 200,
         });
@@ -148,7 +148,7 @@ async function generateCommentReply(commentText) {
         const groq = getGroqClient();
         const completion = await groq.chat.completions.create({
             messages: [{ role: 'user', content: prompt }],
-            model: 'llama-3.1-8b-instant',
+            model: 'llama-3.3-8b-instant',
             max_tokens: 100,
         });
         return completion.choices[0]?.message?.content?.trim() || '';
