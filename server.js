@@ -78,6 +78,35 @@ app.get('/', (req, res) => {
 });
 
 // ============================================================
+// [NEW] Test Endpoint — เช็คว่าบอทพร้อมตอบจริงไหม
+// ============================================================
+app.get('/test', async (req, res) => {
+    const results = { ai: '⌛ Testing...', facebook: '⌛ Testing...' };
+    
+    // 1. Test AI (Groq)
+    try {
+        const { generateChatReply } = require('./services/aiService');
+        const aiRes = await generateChatReply('สวัสดี', [], { userName: 'TestUser' });
+        results.ai = `✅ OK (Reply: ${aiRes.reply})`;
+    } catch (e) {
+        results.ai = `❌ Error: ${e.message}`;
+    }
+
+    // 2. Test Facebook Token
+    try {
+        const FB_API = 'https://graph.facebook.com/v19.0';
+        const fbRes = await axios.get(`${FB_API}/me`, {
+            params: { access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN, fields: 'id,name' }
+        });
+        results.facebook = `✅ OK (Page: ${fbRes.data.name})`;
+    } catch (e) {
+        results.facebook = `❌ Error: ${e.response?.data?.error?.message || e.message}`;
+    }
+
+    res.json(results);
+});
+
+// ============================================================
 // Self-Ping ป้องกัน Render Free Tier หลับ (ทุก 10 นาที)
 // ============================================================
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
