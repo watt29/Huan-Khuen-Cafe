@@ -4,7 +4,7 @@
 //  ใช้ In-Memory store แทน SQLite
 // ========================================================
 const { generateChatReply } = require('../services/aiService');
-const { sendMessage, sendTypingIndicator, getUserProfile } = require('../services/facebookService');
+const { sendMessage, sendTypingIndicator, sendMarkSeen, getUserProfile } = require('../services/facebookService');
 const { getSession, addToCart, getCartSummary, clearCart, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
 const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
@@ -25,6 +25,9 @@ async function handleMessage(event) {
     // ---- [1] ป้องกันตอบซ้ำ ----
     if (hasProcessed(messageId)) return;
     markProcessed(messageId);
+
+    // ---- [2] Mark Seen (อ่านแล้วอัตโนมัติ) ----
+    await sendMarkSeen(senderId);
 
     // ---- [2] Admin Slash Commands ----
     if (text.startsWith('/')) {

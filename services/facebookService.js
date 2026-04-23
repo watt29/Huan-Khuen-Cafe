@@ -37,6 +37,20 @@ async function sendTypingIndicator(recipientId, state = 'typing_on') {
     }
 }
 
+// --- ส่งสถานะ "อ่านแล้ว" ---
+async function sendMarkSeen(recipientId) {
+    try {
+        await axios.post(`${FB_API}/me/messages`, {
+            recipient: { id: recipientId },
+            sender_action: 'mark_seen'
+        }, {
+            params: { access_token: PAGE_TOKEN }
+        });
+    } catch (err) {
+        console.warn('⚠️ ไม่สามารถส่ง Mark Seen ได้');
+    }
+}
+
 // --- ดึงข้อมูลชื่อลูกค้า ---
 async function getUserProfile(userId) {
     if (!userId) return null;
@@ -100,4 +114,4 @@ async function likeComment(commentId) {
     }
 }
 
-module.exports = { sendMessage, replyToComment, likeComment, sendTypingIndicator, getUserProfile };
+module.exports = { sendMessage, replyToComment, likeComment, sendTypingIndicator, sendMarkSeen, getUserProfile };

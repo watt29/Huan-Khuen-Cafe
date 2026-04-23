@@ -11,6 +11,7 @@ const express = require('express');
 const axios = require('axios');
 const { handleMessage } = require('./handlers/messageHandler');
 const { handleComment } = require('./handlers/commentHandler');
+const { runCatchup } = require('./services/catchupService');
 
 const app = express();
 app.use(express.json());
@@ -152,4 +153,9 @@ app.listen(PORT, () => {
     console.log('📌 Verify Token:', VERIFY_TOKEN);
     console.log('');
     console.log('⚡ รอรับ Events จาก Facebook...');
+
+    // [NEW] รัน Catch-up กวาดข้อความค้าง 30 นาทีล่าสุด
+    setTimeout(() => {
+        runCatchup(handleMessage).catch(err => console.error('❌ Catch-up failed:', err));
+    }, 5000); // รอ 5 วินาทีให้ระบบนิ่งก่อนเริ่มกวาด
 });
