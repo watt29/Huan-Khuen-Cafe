@@ -7,6 +7,7 @@ const { generateCommentReply } = require('../services/aiService');
 const { replyToComment, likeComment, sendMessage } = require('../services/facebookService');
 const { updateSession, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
+const { logCustomerToSheet } = require('../services/googleSheetService');
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID;
 
@@ -37,6 +38,12 @@ async function handleComment(item) {
     markProcessed(commentId);
 
     console.log(`💬 [COMMENT] "${commentText}" จาก ${fromName} (${fromId})`);
+
+    // 0. บันทึกข้อมูลลูกค้าลง CRM
+    logCustomerToSheet({
+        name: fromName,
+        facebookId: fromId
+    }).catch(() => {});
 
     // 1. Like comment ก่อนเสมอ
     await likeComment(commentId);

@@ -8,6 +8,7 @@ const { sendMessage, sendTypingIndicator, sendMarkSeen, getUserProfile } = requi
 const { getSession, addToCart, getCartSummary, clearCart, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
 const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
+const { logOrderToSheet, logCustomerToSheet } = require('../services/googleSheetService');
 
 // ประวัติการสนทนาต่อ User (max 10 turns)
 const chatHistories = new Map();
@@ -105,6 +106,13 @@ async function handleMessage(event) {
     // ---- [5] ดึงชื่อลูกค้า ----
     const profile = await getUserProfile(senderId);
     const userName = profile?.first_name || 'คุณลูกค้า';
+    const fullName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : 'คุณลูกค้า';
+
+    // ---- [5.1] บันทึกข้อมูลลูกค้าลง CRM (Google Sheets) ----
+    logCustomerToSheet({
+        name: fullName,
+        facebookId: senderId
+    }).catch(() => {}); // ทำแบบเบลอๆ เบื้องหลัง
 
     // ---- [6] Keyword Handoff ----
     const handoffKeywords = ['คุยกับคน', 'ขอสายแอดมิน', 'แอดมินอยู่ไหม', 'ติดต่อเจ้าหน้าที่'];
@@ -127,6 +135,14 @@ async function handleMessage(event) {
     if (text.includes('สรุป') || text.includes('ยอด') || text.includes('เช็คบิล')) {
         const summary = getCartSummary(senderId);
         if (summary) {
+            // บันทึกออร์เดอร์ลง Google Sheets (ทำแบบเบื้องหลัง ไม่ต้องรอให้เสร็จ)
+            logOrderToSheet({
+                customerName: userName,
+                orderItems: summary.lines.join(', '),
+                totalPrice: summary.total,
+                paymentMethod: 'รอแจ้งโอน'
+            }).catch(console.error);
+
             await sendMessage(senderId,
                 `📝 [สรุปออร์เดอร์ของคุณ${userName} ค่ะ]\n\n${summary.lines.join('\n')}\n\n💰 ยอดรวม: ${summary.total} บาท\n\nสะดวกโอนเงินหรือชำระปลายทางดีคะ? ✨`
             );
