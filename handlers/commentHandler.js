@@ -1,15 +1,16 @@
 // ========================================================
-//  handlers/commentHandler.js
+//  handlers/commentHandler.js  (v2)
 //  จัดการ Comment บน Post + ดึงเข้า Inbox อัตโนมัติ
+//  ใช้ In-Memory store แทน SQLite
 // ========================================================
 const { generateCommentReply } = require('../services/aiService');
 const { replyToComment, likeComment, sendMessage } = require('../services/facebookService');
-const { getSession, updateSession, STEPS } = require('../services/sessionService');
-const { run, query } = require('../services/database');
+const { updateSession, STEPS } = require('../services/sessionService');
+const { hasProcessed, markProcessed } = require('../services/database');
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID;
 
-// คำที่ trigger ให้ดึงเข้า Inbox
+// คำที่ trigger ให้ส่ง DM เข้า Inbox
 const INBOX_TRIGGER_WORDS = [
     'สนใจ', 'สั่ง', 'cf', 'order', 'ขอ', 'เอา', 'อยากได้',
     'ราคา', 'เท่าไหร่', 'เท่าไร', 'กี่บาท', 'โอน', 'จ่าย',
@@ -29,30 +30,24 @@ async function handleComment(item) {
     const fromName    = item.value?.from?.name || 'คุณลูกค้า';
 
     if (!commentId || !commentText) return;
-    if (fromId === PAGE_ID) return;           
+    if (fromId === PAGE_ID) return; // ไม่ตอบตัวเอง
 
-    // --- ตรวจสอบการตอบซ้ำ (Intelligent Memory) ---
-    const existing = await query('SELECT id FROM interactions WHERE id = ?', [commentId]);
-    if (existing.length > 0) return;
-    await run('INSERT INTO interactions (id, type, content) VALUES (?, ?, ?)', [commentId, 'comment', commentText]);
+    // ---- ป้องกันตอบซ้ำ ----
+    if (hasProcessed(commentId)) return;
+    markProcessed(commentId);
 
     console.log(`💬 [COMMENT] "${commentText}" จาก ${fromName} (${fromId})`);
 
-    // 1. Like comment
+    // 1. Like comment ก่อนเสมอ
     await likeComment(commentId);
 
-    const triggerInbox = shouldTriggerInbox(commentText);
-
-    if (triggerInbox) {
-        // 2a. ตอบใต้ comment สั้นๆ ชวนไป Inbox
+    if (shouldTriggerInbox(commentText)) {
+        // 2a. ตอบใต้ comment ชวนไป Inbox
         await replyToComment(commentId,
             `ขอบคุณที่สนใจนะคะ ${fromName} 🤍 ส่งรายละเอียดให้ทาง Inbox แล้วค่ะ ☕`
         );
-
         // 2b. ส่ง DM เข้า Inbox ทันที
-        const session = getSession(fromId);
         updateSession(fromId, { step: STEPS.BROWSING, fromComment: true });
-
         await sendMessage(fromId,
             `สวัสดีค่ะ ${fromName} 🤍\n` +
             `ยินดีต้อนรับสู่ กาลเวลา | Huan Khuen Cafe ค่ะ\n\n` +
@@ -60,14 +55,13 @@ async function handleComment(item) {
             `☕ กาแฟสกัดเย็น — หอมเข้มสดชื่น\n` +
             `🥐 ครัวซองต์อบใหม่ — เนยหอม กรอบนอกนุ่มใน\n` +
             `🌿 ชาเขียวพรีเมียม — มัทฉะแท้จากญี่ปุ่น\n\n` +
-            `สนใจเมนูไหนเป็นพิเศษคะ? หรืออยากดูเมนูทั้งหมดก่อนเลยค่ะ 😊`
+            `สนใจเมนูไหนเป็นพิเศษคะ? 😊`
         );
-
         console.log(`📩 [INBOX] ส่ง DM ไปหา ${fromName} (${fromId}) แล้ว`);
     } else {
-        // 2b. ตอบ comment ปกติด้วย AI
+        // 2b. ตอบ comment ด้วย Groq AI
         const reply = await generateCommentReply(commentText);
-        await replyToComment(commentId, reply);
+        if (reply) await replyToComment(commentId, reply);
     }
 }
 

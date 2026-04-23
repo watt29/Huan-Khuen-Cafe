@@ -1,18 +1,16 @@
 {
   "name": "huankhuen-facebook-bot",
-  "version": "1.0.0",
-  "description": "Facebook Auto-Reply Bot สำหรับเพจ Huan Khuen Cafe",
+  "version": "2.0.0",
+  "description": "Facebook Auto-Reply Bot สำหรับเพจ กาลเวลา | Huan Khuen Cafe",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@google/genai": "^1.50.1",
     "axios": "^1.7.2",
-    "better-sqlite3": "^12.9.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "groq-sdk": "^1.1.2"
+    "groq-sdk": "^0.9.1"
   }
 }
