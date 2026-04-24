@@ -55,11 +55,14 @@ async function sendMenuCategories(senderId, userName = 'คุณลูกค้
 //  สร้าง Text เมนูอาหารเช้า
 // ─────────────────────────────────────────────
 function buildBreakfastText() {
-    let text = `🍳 เมนูอาหารเช้า\n${'─'.repeat(28)}\n`;
+    let text = `🍳 เมนูอาหารเช้า (ครบทุกรายการ)\n${'─'.repeat(28)}\n`;
     MENU.breakfast.forEach(item => {
-        text += `\n• ${item.name}\n  ${item.highlight}\n  💰 ${item.price} บาท\n`;
+        text += `\n• ${item.name} — ${item.price} บาท\n  ${item.highlight}\n`;
     });
-    text += `\n➕ เพิ่มท็อปปิ้งได้ด้วยนะคะ (พิมพ์ "add-ons" เพื่อดู)`;
+    text += `\n➕ Add-ons เพิ่มได้ค่ะ\n`;
+    MENU.addons.forEach(item => {
+        text += `• ${item.name.replace('Add on - ', '')} — ${item.price} บาท\n`;
+    });
     return text;
 }
 
@@ -70,16 +73,16 @@ function buildBeverageText() {
     const hot  = MENU.beverages.filter(i => i.type === 'hot');
     const iced = MENU.beverages.filter(i => i.type === 'iced');
 
-    let text = `☕ เมนูเครื่องดื่ม\n${'─'.repeat(28)}\n`;
+    let text = `☕ เมนูเครื่องดื่ม (ครบทุกรายการ)\n${'─'.repeat(28)}\n`;
 
     text += `\n🔥 ร้อน\n`;
     hot.forEach(item => {
-        text += `• ${item.name} (${item.size})\n  ${item.highlight}\n  💰 ${item.price} บาท\n`;
+        text += `• ${item.name} (${item.size}) — ${item.price} บาท\n  ${item.highlight}\n`;
     });
 
     text += `\n🧊 เย็น\n`;
     iced.forEach(item => {
-        text += `• ${item.name} (${item.size})\n  ${item.highlight}\n  💰 ${item.price} บาท\n`;
+        text += `• ${item.name} (${item.size}) — ${item.price} บาท\n  ${item.highlight}\n`;
     });
 
     return text;
@@ -90,9 +93,9 @@ function buildBeverageText() {
 // ─────────────────────────────────────────────
 function buildForShareText() {
     const available = MENU.forShare.filter(i => i.price !== null);
-    let text = `🍟 เมนูทานเล่น / For Share\n${'─'.repeat(28)}\n`;
+    let text = `🍟 เมนูทานเล่น / For Share (ครบทุกรายการ)\n${'─'.repeat(28)}\n`;
     available.forEach(item => {
-        text += `\n• ${item.name}\n  ${item.highlight}\n  💰 ${item.price} บาท\n`;
+        text += `\n• ${item.name} — ${item.price} บาท\n  ${item.highlight}\n`;
     });
     return text;
 }
