@@ -5,60 +5,80 @@
 
 function doPost(e) {
   try {
-    // แปลงข้อมูล JSON ที่ส่งมาจาก Render
     var payload = JSON.parse(e.postData.contents);
-    
-    // ตรวจสอบว่าเป็นการส่ง Action: 'logOrder' หรือไม่
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ── logOrder ──────────────────────────────────────────
     if (payload.action === 'logOrder') {
       var data = payload.data;
-      
-      // เลือก Sheet ปัจจุบัน (ชื่อ Sheet แนะนำ: "Order Logs")
-      var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-      
-      // หาก Sheet ยังว่างเปล่า ให้สร้าง Header ให้อัตโนมัติ
-      if (sheet.getLastRow() === 0) {
-        sheet.appendRow([
-          "วัน-เวลา", 
-          "ชื่อลูกค้า (Facebook)", 
-          "รายการออร์เดอร์ (Items)", 
-          "ยอดรวม (บาท)", 
-          "ช่องทางการชำระ", 
-          "สถานะออร์เดอร์"
+      var orderSheet = ss.getSheetByName('Order Logs') || ss.getActiveSheet();
+
+      if (orderSheet.getLastRow() === 0) {
+        orderSheet.appendRow([
+          'วัน-เวลา', 'ชื่อลูกค้า', 'รายการออร์เดอร์ + Note', 'ยอดรวม (฿)', 'ช่องทางชำระ', 'สถานะ'
         ]);
-        // ตกแต่ง Header ให้สวยงาม
-        sheet.getRange("A1:F1").setFontWeight("bold").setBackground("#e0e0e0");
+        orderSheet.getRange('A1:F1').setFontWeight('bold').setBackground('#e0e0e0');
       }
-      
-      // เพิ่มแถวข้อมูลใหม่
-      sheet.appendRow([
-        data.timestamp,       // A: วัน-เวลา
-        data.customerName,    // B: ชื่อลูกค้า
-        data.orderItems,      // C: รายการออร์เดอร์
-        data.totalPrice,      // D: ยอดรวม
-        data.paymentMethod,   // E: ช่องทางการชำระ (โอน/ปลายทาง)
-        data.status           // F: สถานะ (รอการชำระเงิน)
+
+      orderSheet.appendRow([
+        data.timestamp,
+        data.customerName,
+        data.orderItems,
+        data.totalPrice,
+        data.paymentMethod,
+        data.status || 'New Order'
       ]);
-      
-      return ContentService.createTextOutput(JSON.stringify({
-        "status": "success",
-        "message": "บันทึกออร์เดอร์เรียบร้อย"
-      })).setMimeType(ContentService.MimeType.JSON);
+
+      return ok('บันทึกออร์เดอร์เรียบร้อย');
     }
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      "status": "ignored",
-      "message": "ไม่ได้ระบุ Action"
-    })).setMimeType(ContentService.MimeType.JSON);
-    
+
+    // ── logCustomer (CRM) ─────────────────────────────────
+    if (payload.action === 'logCustomer') {
+      var cdata = payload.data;
+      var crmSheet = ss.getSheetByName('CRM') || ss.insertSheet('CRM');
+
+      if (crmSheet.getLastRow() === 0) {
+        crmSheet.appendRow([
+          'First Interaction', 'Name', 'Facebook ID', 'Phone', 'เปิดแชท (Inbox)'
+        ]);
+        crmSheet.getRange('A1:E1').setFontWeight('bold').setBackground('#cfe2ff');
+      }
+
+      // ไม่บันทึกซ้ำถ้า Facebook ID เดิมมีอยู่แล้ว
+      var ids = crmSheet.getRange(2, 3, Math.max(crmSheet.getLastRow() - 1, 1), 1).getValues().flat();
+      if (ids.includes(String(cdata.facebookId))) return ok('ลูกค้าเดิม ข้ามการบันทึก');
+
+      crmSheet.appendRow([
+        cdata.timestamp,
+        cdata.name,
+        cdata.facebookId,
+        cdata.phone || '-',
+        cdata.inboxLink   // ลิงก์เปิดแชทใน Messenger โดยตรง
+      ]);
+
+      // ทำ inboxLink เป็น Hyperlink คลิกได้
+      var lastRow = crmSheet.getLastRow();
+      var linkFormula = `=HYPERLINK("${cdata.inboxLink}","เปิดแชท")`;
+      crmSheet.getRange(lastRow, 5).setFormula(linkFormula);
+
+      return ok('บันทึกลูกค้าใหม่เรียบร้อย');
+    }
+
+    return ok('ไม่ได้ระบุ Action');
+
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({
-      "status": "error",
-      "message": error.message
+      status: 'error', message: error.message
     })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
-// สำหรับ Test ผ่าน Browser (เพื่อเช็คว่า Script Live หรือไม่)
+function ok(msg) {
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'success', message: msg
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
 function doGet(e) {
-  return ContentService.createTextOutput("✅ กาลเวลา | Google Sheets API is running 100%");
+  return ContentService.createTextOutput('✅ กาลเวลา | Google Sheets API is running 100%');
 }

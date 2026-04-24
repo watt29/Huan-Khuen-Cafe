@@ -45,7 +45,7 @@ async function logCustomerToSheet(customerData) {
                 name: customerData.name,
                 facebookId: customerData.facebookId,
                 phone: customerData.phone || '-',
-                profileLink: `https://www.facebook.com/${customerData.facebookId}`
+                inboxLink: `https://www.facebook.com/messages/t/${customerData.facebookId}`
             }
         };
         await axios.post(SCRIPT_URL, payload);
