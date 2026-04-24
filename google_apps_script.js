@@ -53,17 +53,20 @@ function doPost(e) {
       var ids = crmSheet.getRange(2, 3, Math.max(crmSheet.getLastRow() - 1, 1), 1).getValues().flat();
       if (ids.includes(String(cdata.facebookId))) return ok('ลูกค้าเดิม ข้ามการบันทึก');
 
+      // แก้ปัญหาชื่อ ??? — decode UTF-8 ให้ถูกต้อง
+      var safeName = cdata.name ? cdata.name.toString() : 'ไม่ทราบชื่อ';
+
       crmSheet.appendRow([
         cdata.timestamp,
-        cdata.name,
+        safeName,
         cdata.facebookId,
         cdata.phone || '-',
-        cdata.inboxLink   // ลิงก์เปิดแชทใน Messenger โดยตรง
+        cdata.inboxLink
       ]);
 
-      // ทำ inboxLink เป็น Hyperlink คลิกได้
+      // ทำลิงก์คลิกได้ — ใช้ Business Suite URL
       var lastRow = crmSheet.getLastRow();
-      var linkFormula = `=HYPERLINK("${cdata.inboxLink}","เปิดแชท")`;
+      var linkFormula = '=HYPERLINK("' + cdata.inboxLink + '","เปิดแชท")';
       crmSheet.getRange(lastRow, 5).setFormula(linkFormula);
 
       return ok('บันทึกลูกค้าใหม่เรียบร้อย');
