@@ -5,7 +5,7 @@
 // ========================================================
 const { generateChatReply } = require('../services/aiService');
 const { sendMessage, sendTypingIndicator, sendMarkSeen, getUserProfile } = require('../services/facebookService');
-const { getSession, addToCart, getCartSummary, clearCart, STEPS } = require('../services/sessionService');
+const { getSession, addToCart, getCartSummary, clearCart, saveDelivery, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
 const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
 const { logOrderToSheet, logCustomerToSheet } = require('../services/googleSheetService');
@@ -149,20 +149,70 @@ async function handleMessage(event) {
         }
     }
 
-    // ---- [8] Bill Summary ----
+    // ---- [8] Delivery Info Collection ----
+    const session = getSession(senderId);
+
+    // ถ้าอยู่ใน step DELIVERY → parse ข้อมูลที่อยู่ เบอร์ ช่องทางส่ง
+    if (session.step === STEPS.DELIVERY) {
+        const lower = text.toLowerCase();
+        const method = lower.includes('grab') ? 'Grab' :
+                       lower.includes('line') || lower.includes('ไลน์แมน') ? 'LINE MAN' :
+                       lower.includes('วิ่ง') || lower.includes('ร้านส่ง') || lower.includes('เอง') ? 'ร้านวิ่งส่ง' : null;
+
+        const phoneMatch = text.match(/0[0-9]{8,9}/);
+        const phone = phoneMatch ? phoneMatch[0] : null;
+
+        // ตัดเบอร์และ keyword ออก เหลือที่อยู่
+        let address = text
+            .replace(/0[0-9]{8,9}/g, '')
+            .replace(/(grab|lineman|ไลน์แมน|line man|วิ่งส่ง|ร้านส่ง|ร้านวิ่ง)/gi, '')
+            .replace(/\s+/g, ' ').trim();
+
+        saveDelivery(senderId, {
+            address: address || null,
+            phone: phone || null,
+            method: method || 'รอยืนยัน'
+        });
+
+        const summary = getCartSummary(senderId);
+        const delivery = getSession(senderId).delivery;
+
+        // log ลง Sheets พร้อมข้อมูลจัดส่งครบ
+        logOrderToSheet({
+            customerName: fullName,
+            orderItems: summary ? summary.lines.join(', ') : '-',
+            totalPrice: summary ? summary.total : '-',
+            paymentMethod: 'รอแจ้งโอน',
+            deliveryAddress: delivery.address || '-',
+            deliveryPhone: delivery.phone || '-',
+            deliveryMethod: delivery.method || '-'
+        }).catch(console.error);
+
+        await sendMessage(senderId,
+            `✅ รับทราบค่ะคุณ${userName}!\n\n` +
+            `📦 ที่อยู่: ${delivery.address || 'รอยืนยัน'}\n` +
+            `📞 เบอร์: ${delivery.phone || 'รอยืนยัน'}\n` +
+            `🛵 ส่งผ่าน: ${delivery.method}\n\n` +
+            `${summary ? `💰 ยอดรวม: ${summary.total} บาท\n\n` : ''}` +
+            `น้องกาลเวลาจะรีบเตรียมออร์เดอร์ให้เลยค่ะ 🙏`
+        );
+        return;
+    }
+
+    // ---- [8.1] Bill Summary → ถามข้อมูลจัดส่ง ----
     if (text.includes('สรุป') || text.includes('ยอด') || text.includes('เช็คบิล')) {
         const summary = getCartSummary(senderId);
         if (summary) {
-            // บันทึกออร์เดอร์ลง Google Sheets (ทำแบบเบื้องหลัง ไม่ต้องรอให้เสร็จ)
-            logOrderToSheet({
-                customerName: userName,
-                orderItems: summary.lines.join(', '),
-                totalPrice: summary.total,
-                paymentMethod: 'รอแจ้งโอน'
-            }).catch(console.error);
+            // เปลี่ยน step เป็น DELIVERY เพื่อรอรับข้อมูล
+            session.step = STEPS.DELIVERY;
 
             await sendMessage(senderId,
-                `📝 [สรุปออร์เดอร์ของคุณ${userName} ค่ะ]\n\n${summary.lines.join('\n')}\n\n💰 ยอดรวม: ${summary.total} บาท\n\nสะดวกโอนเงินหรือชำระปลายทางดีคะ? ✨`
+                `📝 สรุปออร์เดอร์ของคุณ${userName} ค่ะ\n\n${summary.lines.join('\n')}\n\n💰 ยอดรวม: ${summary.total} บาท\n\n` +
+                `รบกวนแจ้งข้อมูลจัดส่งด้วยนะคะ 🛵\n` +
+                `1. ที่อยู่จัดส่ง\n` +
+                `2. เบอร์โทรติดต่อ\n` +
+                `3. ส่งผ่าน Grab / LINE MAN / ให้ร้านวิ่งส่ง\n\n` +
+                `พิมพ์มาในข้อความเดียวได้เลยค่ะ 😊`
             );
             return;
         }

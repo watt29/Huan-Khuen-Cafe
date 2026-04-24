@@ -21,6 +21,9 @@ async function logOrderToSheet(orderData) {
                 orderItems: orderData.orderItems,
                 totalPrice: orderData.totalPrice,
                 paymentMethod: orderData.paymentMethod || 'รอแจ้งโอน',
+                deliveryAddress: orderData.deliveryAddress || '-',
+                deliveryPhone: orderData.deliveryPhone || '-',
+                deliveryMethod: orderData.deliveryMethod || '-',
                 status: 'New Order'
             }
         };

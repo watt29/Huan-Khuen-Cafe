@@ -15,9 +15,11 @@ function doPost(e) {
 
       if (orderSheet.getLastRow() === 0) {
         orderSheet.appendRow([
-          'วัน-เวลา', 'ชื่อลูกค้า', 'รายการออร์เดอร์ + Note', 'ยอดรวม (฿)', 'ช่องทางชำระ', 'สถานะ'
+          'วัน-เวลา', 'ชื่อลูกค้า', 'รายการออร์เดอร์ + Note',
+          'ยอดรวม (฿)', 'ช่องทางชำระ',
+          'ที่อยู่จัดส่ง', 'เบอร์โทร', 'ช่องทางส่ง', 'สถานะ'
         ]);
-        orderSheet.getRange('A1:F1').setFontWeight('bold').setBackground('#e0e0e0');
+        orderSheet.getRange('A1:I1').setFontWeight('bold').setBackground('#e0e0e0');
       }
 
       orderSheet.appendRow([
@@ -26,6 +28,9 @@ function doPost(e) {
         data.orderItems,
         data.totalPrice,
         data.paymentMethod,
+        data.deliveryAddress || '-',
+        data.deliveryPhone   || '-',
+        data.deliveryMethod  || '-',
         data.status || 'New Order'
       ]);
 

@@ -7,20 +7,26 @@
 const sessions = new Map();
 
 const STEPS = {
-    NEW:      'NEW',       // ทักครั้งแรก
-    BROWSING: 'BROWSING',  // กำลังดูเมนู
-    ORDERED:  'ORDERED',   // สั่งอย่างน้อย 1 อย่างแล้ว
-    UPSELL:   'UPSELL',    // เสนอเมนูเพิ่ม
-    CHECKOUT: 'CHECKOUT',  // สรุปออร์เดอร์
+    NEW:      'NEW',
+    BROWSING: 'BROWSING',
+    ORDERED:  'ORDERED',
+    UPSELL:   'UPSELL',
+    CHECKOUT: 'CHECKOUT',
+    DELIVERY: 'DELIVERY',  // รอลูกค้ากรอกที่อยู่ + เบอร์ + ช่องทางส่ง
 };
 
 function getSession(userId) {
     if (!sessions.has(userId)) {
         sessions.set(userId, {
             step: STEPS.NEW,
-            cart: [],          // [{ name, price, qty }]
-            lastProduct: null, // เมนูล่าสุดที่สนใจ
-            fromComment: false // มาจาก comment trigger หรือไม่
+            cart: [],
+            lastProduct: null,
+            fromComment: false,
+            delivery: {        // ข้อมูลจัดส่ง
+                address: null,
+                phone: null,
+                method: null   // 'grab' | 'lineman' | 'self'
+            }
         });
     }
     return sessions.get(userId);
@@ -54,7 +60,17 @@ function getCartSummary(userId) {
 }
 
 function clearCart(userId) {
-    updateSession(userId, { cart: [], step: STEPS.BROWSING, lastProduct: null });
+    updateSession(userId, {
+        cart: [], step: STEPS.BROWSING, lastProduct: null,
+        delivery: { address: null, phone: null, method: null }
+    });
 }
 
-module.exports = { getSession, updateSession, addToCart, getCartSummary, clearCart, STEPS };
+function saveDelivery(userId, delivery) {
+    const session = getSession(userId);
+    Object.assign(session.delivery, delivery);
+    session.step = STEPS.CHECKOUT;
+    sessions.set(userId, session);
+}
+
+module.exports = { getSession, updateSession, addToCart, getCartSummary, clearCart, saveDelivery, STEPS };
