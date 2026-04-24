@@ -4,10 +4,11 @@
 //  ใช้ In-Memory store แทน SQLite
 // ========================================================
 const { generateCommentReply } = require('../services/aiService');
-const { replyToComment, likeComment, sendMessage } = require('../services/facebookService');
+const { replyToComment, likeComment, sendMessage, sendQuickReplies } = require('../services/facebookService');
 const { updateSession, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
 const { logCustomerToSheet } = require('../services/googleSheetService');
+const { MENU } = require('../menu');
 
 const PAGE_ID = process.env.FACEBOOK_PAGE_ID;
 
@@ -53,20 +54,46 @@ async function handleComment(item) {
         await replyToComment(commentId,
             `ขอบคุณที่สนใจนะคะ ${fromName} 🤍 ส่งรายละเอียดให้ทาง Inbox แล้วค่ะ ☕`
         );
-        // 2b. ส่ง DM เข้า Inbox ทันที
+
+        // 2b. ส่ง DM เข้า Inbox พร้อม Quick Reply เลือกหมวดเมนูจริง
         updateSession(fromId, { step: STEPS.BROWSING, fromComment: true });
-        await sendMessage(fromId,
-            `สวัสดีค่ะ ${fromName} 🤍\n` +
-            `ยินดีต้อนรับสู่ กาลเวลา | Huan Khuen Cafe ค่ะ\n\n` +
-            `เห็นว่าสนใจอยู่นะคะ ✨ มีเมนูแนะนำค่ะ:\n` +
-            `☕ กาแฟสกัดเย็น — หอมเข้มสดชื่น\n` +
-            `🥐 ครัวซองต์อบใหม่ — เนยหอม กรอบนอกนุ่มใน\n` +
-            `🌿 ชาเขียวพรีเมียม — มัทฉะแท้จากญี่ปุ่น\n\n` +
-            `สนใจเมนูไหนเป็นพิเศษคะ? 😊`
+
+        // detect keyword จาก comment เพื่อแนะนำเมนูที่ตรงกับสิ่งที่ลูกค้าสนใจ
+        const lowerComment = commentText.toLowerCase();
+        let suggestedMenu = '';
+
+        if (lowerComment.includes('กาแฟ') || lowerComment.includes('coffee') || lowerComment.includes('ลาเต้') || lowerComment.includes('อเมริกาโน')) {
+            // แนะนำเมนูกาแฟจริงจาก MENU
+            const coffees = MENU.beverages.filter(i => i.type === 'iced' && i.name.toLowerCase().includes('coffee') || i.name.toLowerCase().includes('latte') || i.name.toLowerCase().includes('americano') || i.name.toLowerCase().includes('cappucino'));
+            suggestedMenu = coffees.slice(0, 3).map(i => `☕ ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
+        } else if (lowerComment.includes('ชา') || lowerComment.includes('มัทฉะ') || lowerComment.includes('matcha')) {
+            const teas = MENU.beverages.filter(i => i.name.toLowerCase().includes('matcha') || i.name.toLowerCase().includes('tea'));
+            suggestedMenu = teas.map(i => `🌿 ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
+        } else if (lowerComment.includes('ครัวซองต์') || lowerComment.includes('อาหาร') || lowerComment.includes('เช้า')) {
+            suggestedMenu = MENU.breakfast.slice(0, 3).map(i => `🥐 ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
+        } else {
+            // ไม่รู้ว่าสนใจอะไร → แนะนำ highlight ของร้าน
+            suggestedMenu =
+                `☕ ${MENU.beverages[4].name} — ${MENU.beverages[4].highlight} (${MENU.beverages[4].price}฿)\n` +
+                `🌿 ${MENU.beverages[6].name} — ${MENU.beverages[6].highlight} (${MENU.beverages[6].price}฿)\n` +
+                `🥐 ${MENU.breakfast[3].name} — ${MENU.breakfast[3].highlight} (${MENU.breakfast[3].price}฿)`;
+        }
+
+        await sendQuickReplies(
+            fromId,
+            `สวัสดีค่ะ ${fromName} 🤍 ยินดีต้อนรับสู่ กาลเวลา หวนคืน คาเฟ่ค่ะ\n\n` +
+            `เมนูที่น่าสนใจค่ะ:\n${suggestedMenu}\n\n` +
+            `อยากดูเมนูหมวดไหนเพิ่มเติมคะ?`,
+            [
+                { title: '☕ เครื่องดื่ม',  payload: 'MENU_BEVERAGE' },
+                { title: '🍳 อาหารเช้า',    payload: 'MENU_BREAKFAST' },
+                { title: '🍟 ของทานเล่น',  payload: 'MENU_FORSHARE' },
+                { title: '📋 ดูทั้งหมด',   payload: 'MENU_ALL' }
+            ]
         );
         console.log(`📩 [INBOX] ส่ง DM ไปหา ${fromName} (${fromId}) แล้ว`);
     } else {
-        // 2b. ตอบ comment ด้วย Groq AI
+        // 2b. ตอบ comment ด้วย AI
         const reply = await generateCommentReply(commentText);
         if (reply) await replyToComment(commentId, reply);
     }
