@@ -9,6 +9,7 @@ const { getSession, addToCart, getCartSummary, clearCart, STEPS } = require('../
 const { hasProcessed, markProcessed } = require('../services/database');
 const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
 const { logOrderToSheet, logCustomerToSheet } = require('../services/googleSheetService');
+const { isMenuRequest, isMenuPayload, sendMenuCategories, handleMenuPayload } = require('./menuHandler');
 
 // ประวัติการสนทนาต่อ User (max 10 turns)
 const chatHistories = new Map();
@@ -19,6 +20,7 @@ async function handleMessage(event) {
     const senderId = event.sender?.id;
     const text = event.message?.text?.trim();
     const messageId = event.message?.mid;
+    const quickReplyPayload = event.message?.quick_reply?.payload;
 
     // กรองเงื่อนไขพื้นฐาน
     if (!senderId || !text || event.message?.is_echo) return;
@@ -98,6 +100,14 @@ async function handleMessage(event) {
         return;
     }
 
+    // ---- [3.5] Quick Reply Payload (ลูกค้ากดปุ่มหมวดเมนู) ----
+    if (quickReplyPayload && isMenuPayload(quickReplyPayload)) {
+        await sendTypingIndicator(senderId, 'typing_on');
+        await handleMenuPayload(senderId, quickReplyPayload);
+        await sendTypingIndicator(senderId, 'typing_off');
+        return;
+    }
+
     console.log(`💬 [CHAT] จาก ${senderId}: "${text}"`);
 
     // ---- [4] Typing Indicator ----
@@ -121,6 +131,14 @@ async function handleMessage(event) {
         await sendMessage(senderId,
             `ได้เลยค่ะคุณ${userName} รอสักครู่นะคะ น้องกาลเวลาขออนุญาตโอนสายให้พี่แอดมินดูแลแทนทันทีเลยค่ะ 😊`
         );
+        return;
+    }
+
+    // ---- [6.5] Menu Request Detection ----
+    if (isMenuRequest(text)) {
+        await sendTypingIndicator(senderId, 'typing_on');
+        await sendMenuCategories(senderId, userName);
+        await sendTypingIndicator(senderId, 'typing_off');
         return;
     }
 

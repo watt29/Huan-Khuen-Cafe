@@ -114,4 +114,27 @@ async function likeComment(commentId) {
     }
 }
 
-module.exports = { sendMessage, replyToComment, likeComment, sendTypingIndicator, sendMarkSeen, getUserProfile };
+// --- ส่ง Quick Replies (ปุ่มเลือกหมวด) ---
+async function sendQuickReplies(recipientId, text, quickReplies) {
+    try {
+        await axios.post(`${FB_API}/me/messages`, {
+            recipient: { id: recipientId },
+            message: {
+                text,
+                quick_replies: quickReplies.map(qr => ({
+                    content_type: 'text',
+                    title: qr.title,       // max 20 ตัวอักษร
+                    payload: qr.payload
+                }))
+            },
+            messaging_type: 'RESPONSE'
+        }, {
+            params: { access_token: PAGE_TOKEN }
+        });
+        console.log(`✅ [QUICK_REPLIES] ส่งหา ${recipientId} แล้ว`);
+    } catch (err) {
+        console.error('❌ [QUICK_REPLIES] ส่งไม่ได้:', err.response?.data || err.message);
+    }
+}
+
+module.exports = { sendMessage, sendQuickReplies, replyToComment, likeComment, sendTypingIndicator, sendMarkSeen, getUserProfile };
