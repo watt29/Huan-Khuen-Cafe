@@ -70,9 +70,12 @@ async function generateChatReply(userMessage, history = [], context = {}) {
 ตอบเป็น JSON เท่านั้น:
 {
   "sentiment": "HAPPY | NORMAL | FRUSTRATED | ANGRY",
-  "reply": "ข้อความตอบกลับของน้องกาลเวลา (ครบถ้วน อบอุ่น ปิดการขาย)",
-  "order_note": "สรุปสิ่งที่ลูกค้าสั่งและ note ปรับรสชาติ หรือ null ถ้าไม่มี เช่น: Latte x1 (หวานน้อย ไม่ใส่น้ำแข็ง)"
-}`;
+  "reply": "ข้อความตอบกลับสั้น กระชับ อบอุ่น",
+  "ordered_items": [
+    { "name": "ชื่อเมนูจาก knowledge base", "price": ราคาตัวเลข, "qty": จำนวน, "note": "หวานน้อย ไม่ใส่น้ำแข็ง หรือ null" }
+  ]
+}
+ถ้าลูกค้าไม่ได้สั่งเมนูในข้อความนี้ ให้ ordered_items เป็น []`;
 
     for (let attempt = 0; attempt < Math.max(API_KEYS.length, 1); attempt++) {
         try {
@@ -96,7 +99,7 @@ async function generateChatReply(userMessage, history = [], context = {}) {
             return {
                 reply: res.reply || 'น้องกาลเวลาพร้อมดูแลค่ะ รับเมนูไหนดีคะ? ☕',
                 sentiment: res.sentiment || 'NORMAL',
-                orderNote: res.order_note || null
+                orderedItems: Array.isArray(res.ordered_items) ? res.ordered_items : []
             };
         } catch (err) {
             console.warn(`⚠️ Attempt #${attempt + 1} failed: ${err.message}`);

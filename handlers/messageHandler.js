@@ -4,7 +4,7 @@
 //  ใช้ In-Memory store แทน SQLite
 // ========================================================
 const { generateChatReply } = require('../services/aiService');
-const { sendMessage, sendTypingIndicator, sendMarkSeen, getUserProfile } = require('../services/facebookService');
+const { sendMessage, sendQuickReplies, sendTypingIndicator, sendMarkSeen, getUserProfile } = require('../services/facebookService');
 const { getSession, addToCart, getCartSummary, clearCart, saveDelivery, STEPS } = require('../services/sessionService');
 const { hasProcessed, markProcessed } = require('../services/database');
 const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
@@ -100,12 +100,35 @@ async function handleMessage(event) {
         return;
     }
 
-    // ---- [3.5] Quick Reply Payload (ลูกค้ากดปุ่มหมวดเมนู) ----
-    if (quickReplyPayload && isMenuPayload(quickReplyPayload)) {
-        await sendTypingIndicator(senderId, 'typing_on');
-        await handleMenuPayload(senderId, quickReplyPayload);
-        await sendTypingIndicator(senderId, 'typing_off');
-        return;
+    // ---- [3.5] Quick Reply Payload ----
+    if (quickReplyPayload) {
+        // ปุ่มหมวดเมนู
+        if (isMenuPayload(quickReplyPayload)) {
+            await sendTypingIndicator(senderId, 'typing_on');
+            await handleMenuPayload(senderId, quickReplyPayload);
+            await sendTypingIndicator(senderId, 'typing_off');
+            return;
+        }
+
+        // ปุ่มยืนยันออร์เดอร์
+        if (quickReplyPayload === 'ORDER_CONFIRM') {
+            const s = getSession(senderId);
+            s.step = STEPS.DELIVERY;
+            await sendMessage(senderId,
+                `ขอบคุณค่ะ 🙏 รบกวนแจ้งข้อมูลจัดส่งในข้อความเดียวนะคะ\n\n` +
+                `📍 ที่อยู่ / 📞 เบอร์โทร / 🛵 Grab, LINE MAN หรือร้านวิ่งส่ง`
+            );
+            return;
+        }
+
+        // ปุ่มแก้ไขออร์เดอร์
+        if (quickReplyPayload === 'ORDER_EDIT') {
+            clearCart(senderId);
+            await sendMessage(senderId,
+                `ได้เลยค่ะ ล้างรายการเดิมแล้ว บอกน้องกาลเวลาใหม่ได้เลยนะคะว่าอยากได้อะไรบ้างคะ 😊`
+            );
+            return;
+        }
     }
 
     console.log(`💬 [CHAT] จาก ${senderId}: "${text}"`);
@@ -199,38 +222,39 @@ async function handleMessage(event) {
         return;
     }
 
-    // ---- [8.1] Bill Summary → ถามข้อมูลจัดส่ง ----
+    // ---- [8.1] Bill Summary → ทวนออร์เดอร์ + Quick Reply ยืนยัน ----
     if (text.includes('สรุป') || text.includes('ยอด') || text.includes('เช็คบิล')) {
         const summary = getCartSummary(senderId);
         if (summary) {
-            // เปลี่ยน step เป็น DELIVERY เพื่อรอรับข้อมูล
-            session.step = STEPS.DELIVERY;
-
-            await sendMessage(senderId,
-                `📝 สรุปออร์เดอร์ของคุณ${userName} ค่ะ\n\n${summary.lines.join('\n')}\n\n💰 ยอดรวม: ${summary.total} บาท\n\n` +
-                `รบกวนแจ้งข้อมูลจัดส่งด้วยนะคะ 🛵\n` +
-                `1. ที่อยู่จัดส่ง\n` +
-                `2. เบอร์โทรติดต่อ\n` +
-                `3. ส่งผ่าน Grab / LINE MAN / ให้ร้านวิ่งส่ง\n\n` +
-                `พิมพ์มาในข้อความเดียวได้เลยค่ะ 😊`
+            await sendQuickReplies(
+                senderId,
+                `🧾 ทวนออร์เดอร์ของคุณ${userName} นะคะ\n\n${summary.lines.join('\n')}\n\n💰 รวม ${summary.total} บาท\n\nถูกต้องไหมคะ?`,
+                [
+                    { title: '✅ ยืนยัน', payload: 'ORDER_CONFIRM' },
+                    { title: '❌ แก้ไข',  payload: 'ORDER_EDIT' }
+                ]
             );
+            return;
+        } else {
+            await sendMessage(senderId, `ยังไม่มีรายการออร์เดอร์นะคะคุณ${userName} บอกน้องกาลเวลาได้เลยว่าอยากได้เมนูอะไรคะ 😊`);
             return;
         }
     }
 
     // ---- [9] AI Reply (Groq) ----
     const history = chatHistories.get(senderId) || [];
-    const { reply, sentiment, orderNote } = await generateChatReply(text, history, { userName });
+    const { reply, sentiment, orderedItems } = await generateChatReply(text, history, { userName });
 
-    // ---- [9.1] Monitor — log ออเดอร์+note ลง Sheets ทันทีที่ AI รับออเดอร์ ----
-    if (orderNote) {
-        console.log(`🛒 [ORDER NOTE] ${fullName}: ${orderNote}`);
-        logOrderToSheet({
-            customerName: fullName,
-            orderItems: orderNote,
-            totalPrice: '-',
-            paymentMethod: 'รอยืนยัน'
-        }).catch(() => {});
+    // ---- [9.1] บันทึก cart จาก AI ----
+    if (orderedItems && orderedItems.length > 0) {
+        orderedItems.forEach(item => {
+            addToCart(senderId, {
+                name: item.note ? `${item.name} (${item.note})` : item.name,
+                price: item.price || 0,
+                qty: item.qty || 1
+            });
+        });
+        console.log(`🛒 [CART] ${fullName}: ${orderedItems.map(i => i.name).join(', ')}`);
     }
 
     // ---- [10] Sentiment Auto-Escalation ----
