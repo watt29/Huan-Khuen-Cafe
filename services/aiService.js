@@ -64,15 +64,32 @@ const SYSTEM_PROMPT = `
 เมื่อลูกค้าขอปรับ → ยืนยันกลับทันที เช่น "รับทราบค่ะ note ไว้ว่า Latte หวานน้อย ไม่ใส่น้ำแข็ง 📝"
 เมื่อสรุปออร์เดอร์ → ต้องแสดง note ปรับรสด้วยทุกครั้ง
 
-# [เมนูของร้าน — ใช้ข้อมูลนี้เท่านั้น ห้ามแต่งขึ้นเอง]
-${buildMenuText()}
+# [เมนูของร้าน — ใช้ข้อมูลนี้เท่านั้น ห้ามแต่งขึ้นเอง ห้ามบอกเมนูที่ไม่มีในนี้]
+MENU_PLACEHOLDER
 `.trim();
 
 /**
  * generateChatReply — ตอบ Inbox พร้อมวิเคราะห์อารมณ์
  */
+// สร้าง prompt พร้อมเมนูแบบกระชับ (ลด token)
+function buildCompactMenu() {
+    const { MENU } = require('../menu');
+    let t = '[อาหารเช้า]\n';
+    MENU.breakfast.forEach(i => { t += `${i.name} ${i.price}฿ — ${i.highlight}\n`; });
+    t += '[Add-ons]\n';
+    MENU.addons.forEach(i => { t += `${i.name.replace('Add on - ','')} ${i.price}฿\n`; });
+    t += '[ของทานเล่น]\n';
+    MENU.forShare.filter(i=>i.price).forEach(i => { t += `${i.name} ${i.price}฿ — ${i.highlight}\n`; });
+    t += '[เครื่องดื่มร้อน]\n';
+    MENU.beverages.filter(i=>i.type==='hot').forEach(i => { t += `${i.name} ${i.size} ${i.price}฿ — ${i.highlight}\n`; });
+    t += '[เครื่องดื่มเย็น]\n';
+    MENU.beverages.filter(i=>i.type==='iced').forEach(i => { t += `${i.name} ${i.size} ${i.price}฿ — ${i.highlight}\n`; });
+    return t;
+}
+
 async function generateChatReply(userMessage, history = [], context = {}) {
     const userName = context.userName || 'คุณลูกค้า';
+    const systemWithMenu = SYSTEM_PROMPT.replace('MENU_PLACEHOLDER', buildCompactMenu());
 
     const userPrompt = `[ลูกค้า: ${userName}] พิมพ์ว่า: "${userMessage}"
 
@@ -91,7 +108,7 @@ async function generateChatReply(userMessage, history = [], context = {}) {
             const groq = getGroqClient();
             const completion = await groq.chat.completions.create({
                 messages: [
-                    { role: 'system', content: SYSTEM_PROMPT },
+                    { role: 'system', content: systemWithMenu },
                     ...history.map(h => ({
                         role: h.role === 'model' ? 'assistant' : 'user',
                         content: h.parts[0].text
@@ -100,7 +117,7 @@ async function generateChatReply(userMessage, history = [], context = {}) {
                 ],
                 model: 'llama-3.3-70b-versatile',
                 response_format: { type: 'json_object' },
-                max_tokens: 300,
+                max_tokens: 1200,
                 temperature: 0.7,
             });
 
