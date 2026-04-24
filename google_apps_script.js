@@ -11,14 +11,19 @@ function doPost(e) {
     // ── logOrder ──────────────────────────────────────────
     if (payload.action === 'logOrder') {
       var data = payload.data;
-      var orderSheet = ss.getSheetByName('Order Logs') || ss.getActiveSheet();
+      // รองรับทั้ง "ชีท1" และ "Order Logs"
+      var orderSheet = ss.getSheetByName('ชีท1') || ss.getSheetByName('Order Logs') || ss.getActiveSheet();
 
+      // อัพเดต header ให้ครบ 9 คอลัมน์ ไม่ว่า Sheet จะมี header เก่าหรือใหม่
+      var headers = ['วัน-เวลา', 'ชื่อลูกค้า', 'รายการออร์เดอร์ + Note',
+                     'ยอดรวม (฿)', 'ช่องทางชำระ',
+                     'ที่อยู่จัดส่ง', 'เบอร์โทร', 'ช่องทางส่ง', 'สถานะ'];
       if (orderSheet.getLastRow() === 0) {
-        orderSheet.appendRow([
-          'วัน-เวลา', 'ชื่อลูกค้า', 'รายการออร์เดอร์ + Note',
-          'ยอดรวม (฿)', 'ช่องทางชำระ',
-          'ที่อยู่จัดส่ง', 'เบอร์โทร', 'ช่องทางส่ง', 'สถานะ'
-        ]);
+        orderSheet.appendRow(headers);
+        orderSheet.getRange('A1:I1').setFontWeight('bold').setBackground('#e0e0e0');
+      } else if (orderSheet.getRange(1, 1).getValue() === 'Timestamp') {
+        // header เก่าภาษาอังกฤษ → เขียนทับด้วย header ใหม่
+        orderSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
         orderSheet.getRange('A1:I1').setFontWeight('bold').setBackground('#e0e0e0');
       }
 
@@ -40,12 +45,16 @@ function doPost(e) {
     // ── logCustomer (CRM) ─────────────────────────────────
     if (payload.action === 'logCustomer') {
       var cdata = payload.data;
-      var crmSheet = ss.getSheetByName('CRM') || ss.insertSheet('CRM');
+      // รองรับทั้ง "CRM" และ "Customers"
+      var crmSheet = ss.getSheetByName('CRM') || ss.getSheetByName('Customers') || ss.insertSheet('CRM');
 
+      var crmHeaders = ['First Interaction', 'Name', 'Facebook ID', 'Phone', 'เปิดแชท (Inbox)'];
       if (crmSheet.getLastRow() === 0) {
-        crmSheet.appendRow([
-          'First Interaction', 'Name', 'Facebook ID', 'Phone', 'เปิดแชท (Inbox)'
-        ]);
+        crmSheet.appendRow(crmHeaders);
+        crmSheet.getRange('A1:E1').setFontWeight('bold').setBackground('#cfe2ff');
+      } else if (crmSheet.getRange(1, 5).getValue() !== 'เปิดแชท (Inbox)') {
+        // header เก่าไม่มีคอลัมน์ "เปิดแชท" → เขียนทับ
+        crmSheet.getRange(1, 1, 1, crmHeaders.length).setValues([crmHeaders]);
         crmSheet.getRange('A1:E1').setFontWeight('bold').setBackground('#cfe2ff');
       }
 
