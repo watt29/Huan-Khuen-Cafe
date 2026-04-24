@@ -170,7 +170,18 @@ async function handleMessage(event) {
 
     // ---- [9] AI Reply (Groq) ----
     const history = chatHistories.get(senderId) || [];
-    const { reply, sentiment } = await generateChatReply(text, history, { userName });
+    const { reply, sentiment, orderNote } = await generateChatReply(text, history, { userName });
+
+    // ---- [9.1] Monitor — log ออเดอร์+note ลง Sheets ทันทีที่ AI รับออเดอร์ ----
+    if (orderNote) {
+        console.log(`🛒 [ORDER NOTE] ${fullName}: ${orderNote}`);
+        logOrderToSheet({
+            customerName: fullName,
+            orderItems: orderNote,
+            totalPrice: '-',
+            paymentMethod: 'รอยืนยัน'
+        }).catch(() => {});
+    }
 
     // ---- [10] Sentiment Auto-Escalation ----
     if (sentiment === 'ANGRY' || sentiment === 'FRUSTRATED') {
