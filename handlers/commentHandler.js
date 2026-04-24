@@ -58,32 +58,63 @@ async function handleComment(item) {
         // 2b. ส่ง DM เข้า Inbox พร้อม Quick Reply เลือกหมวดเมนูจริง
         updateSession(fromId, { step: STEPS.BROWSING, fromComment: true });
 
-        // detect keyword จาก comment เพื่อแนะนำเมนูที่ตรงกับสิ่งที่ลูกค้าสนใจ
+        // detect keyword จาก comment → ส่งเมนูหมวดที่ตรงครบทุกรายการ
         const lowerComment = commentText.toLowerCase();
-        let suggestedMenu = '';
+        let firstMsg = '';
+        let firstPayload = 'MENU_ALL';
 
-        if (lowerComment.includes('กาแฟ') || lowerComment.includes('coffee') || lowerComment.includes('ลาเต้') || lowerComment.includes('อเมริกาโน')) {
-            // แนะนำเมนูกาแฟจริงจาก MENU
-            const coffees = MENU.beverages.filter(i => i.type === 'iced' && i.name.toLowerCase().includes('coffee') || i.name.toLowerCase().includes('latte') || i.name.toLowerCase().includes('americano') || i.name.toLowerCase().includes('cappucino'));
-            suggestedMenu = coffees.slice(0, 3).map(i => `☕ ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
-        } else if (lowerComment.includes('ชา') || lowerComment.includes('มัทฉะ') || lowerComment.includes('matcha')) {
-            const teas = MENU.beverages.filter(i => i.name.toLowerCase().includes('matcha') || i.name.toLowerCase().includes('tea'));
-            suggestedMenu = teas.map(i => `🌿 ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
-        } else if (lowerComment.includes('ครัวซองต์') || lowerComment.includes('อาหาร') || lowerComment.includes('เช้า')) {
-            suggestedMenu = MENU.breakfast.slice(0, 3).map(i => `🥐 ${i.name} — ${i.highlight} (${i.price}฿)`).join('\n');
+        if (lowerComment.includes('กาแฟ') || lowerComment.includes('coffee') ||
+            lowerComment.includes('ลาเต้') || lowerComment.includes('อเมริกาโน') ||
+            lowerComment.includes('คาปูชิโน') || lowerComment.includes('matcha') ||
+            lowerComment.includes('มัทฉะ') || lowerComment.includes('ชา') ||
+            lowerComment.includes('โกโก้') || lowerComment.includes('เครื่องดื่ม')) {
+
+            // แสดงเครื่องดื่มทุกตัว
+            const hot  = MENU.beverages.filter(i => i.type === 'hot');
+            const iced = MENU.beverages.filter(i => i.type === 'iced');
+            firstMsg =
+                `สวัสดีค่ะ ${fromName} 🤍\nนี่คือเมนูเครื่องดื่มทั้งหมดของร้านค่ะ\n` +
+                `${'─'.repeat(28)}\n` +
+                `🔥 ร้อน\n` +
+                hot.map(i => `• ${i.name} (${i.size}) — ${i.highlight}\n  💰 ${i.price} บาท`).join('\n') +
+                `\n\n🧊 เย็น\n` +
+                iced.map(i => `• ${i.name} (${i.size}) — ${i.highlight}\n  💰 ${i.price} บาท`).join('\n');
+            firstPayload = 'MENU_BEVERAGE';
+
+        } else if (lowerComment.includes('ครัวซองต์') || lowerComment.includes('อาหาร') ||
+                   lowerComment.includes('เช้า') || lowerComment.includes('แซนด์วิช') ||
+                   lowerComment.includes('breakfast')) {
+
+            // แสดงอาหารเช้าทุกตัว
+            firstMsg =
+                `สวัสดีค่ะ ${fromName} 🤍\nนี่คือเมนูอาหารเช้าทั้งหมดของร้านค่ะ\n` +
+                `${'─'.repeat(28)}\n` +
+                MENU.breakfast.map(i => `• ${i.name}\n  ${i.highlight}\n  💰 ${i.price} บาท`).join('\n\n') +
+                `\n\n➕ Add-ons เพิ่มได้ด้วยนะคะ\n` +
+                MENU.addons.map(i => `• ${i.name.replace('Add on - ','')} — ${i.price} บาท`).join('\n');
+            firstPayload = 'MENU_BREAKFAST';
+
         } else {
-            // ไม่รู้ว่าสนใจอะไร → แนะนำ highlight ของร้าน
-            suggestedMenu =
-                `☕ ${MENU.beverages[4].name} — ${MENU.beverages[4].highlight} (${MENU.beverages[4].price}฿)\n` +
-                `🌿 ${MENU.beverages[6].name} — ${MENU.beverages[6].highlight} (${MENU.beverages[6].price}฿)\n` +
-                `🥐 ${MENU.breakfast[3].name} — ${MENU.breakfast[3].highlight} (${MENU.breakfast[3].price}฿)`;
+            // ไม่รู้หมวด → ส่งเมนูทั้งหมดครบทุกหมวด
+            firstMsg =
+                `สวัสดีค่ะ ${fromName} 🤍 ยินดีต้อนรับสู่ กาลเวลา หวนคืน คาเฟ่ค่ะ\n` +
+                `${'═'.repeat(30)}\n\n` +
+                `🍳 อาหารเช้า\n` +
+                MENU.breakfast.map(i => `• ${i.name} — ${i.price} บาท`).join('\n') +
+                `\n\n☕ เครื่องดื่ม\n` +
+                MENU.beverages.map(i => `• ${i.name} — ${i.price} บาท`).join('\n') +
+                `\n\n🍟 ของทานเล่น\n` +
+                MENU.forShare.filter(i => i.price).map(i => `• ${i.name} — ${i.price} บาท`).join('\n') +
+                `\n\n➕ Add-ons\n` +
+                MENU.addons.map(i => `• ${i.name.replace('Add on - ','')} — ${i.price} บาท`).join('\n') +
+                `\n\n📞 สอบถามเพิ่มเติม: ${MENU.shop.contact}`;
         }
 
+        // ส่งเมนูจริงครบก่อน แล้วค่อยส่งปุ่มให้เลือกดูหมวดอื่น
+        await sendMessage(fromId, firstMsg);
         await sendQuickReplies(
             fromId,
-            `สวัสดีค่ะ ${fromName} 🤍 ยินดีต้อนรับสู่ กาลเวลา หวนคืน คาเฟ่ค่ะ\n\n` +
-            `เมนูที่น่าสนใจค่ะ:\n${suggestedMenu}\n\n` +
-            `อยากดูเมนูหมวดไหนเพิ่มเติมคะ?`,
+            `อยากดูหมวดอื่นเพิ่มเติมไหมคะ? 😊`,
             [
                 { title: '☕ เครื่องดื่ม',  payload: 'MENU_BEVERAGE' },
                 { title: '🍳 อาหารเช้า',    payload: 'MENU_BREAKFAST' },
