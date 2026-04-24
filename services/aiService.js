@@ -5,15 +5,43 @@ const { Groq } = require('groq-sdk');
 const { buildMenuText } = require('../menu');
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
-// ระบบ Key Rotation เพื่อความเสถียร
+// ระบบ Key Rotation — สลับ key ทันทีเมื่อ error หรือ rate limit
 const API_KEYS = (process.env.GROQ_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean);
 let currentKeyIndex = 0;
 
-function getGroqClient() {
+// track เวลา rate limit ของแต่ละ key
+const keyRateLimitUntil = {};
+
+function getNextAvailableKey() {
     if (API_KEYS.length === 0) throw new Error('❌ ไม่พบ GROQ_API_KEYS ใน .env');
-    const key = API_KEYS[currentKeyIndex % API_KEYS.length];
-    currentKeyIndex++;
-    return new Groq({ apiKey: key });
+    const now = Date.now();
+
+    // หา key ที่ยังไม่ถูก rate limit
+    for (let i = 0; i < API_KEYS.length; i++) {
+        const idx = (currentKeyIndex + i) % API_KEYS.length;
+        const key = API_KEYS[idx];
+        if (!keyRateLimitUntil[key] || now > keyRateLimitUntil[key]) {
+            currentKeyIndex = (idx + 1) % API_KEYS.length;
+            return key;
+        }
+    }
+
+    // ทุก key ถูก rate limit → ใช้ key ที่หมด limit เร็วที่สุด
+    console.warn('⚠️ ทุก Groq key ถูก rate limit — ใช้ key ที่หมดเร็วที่สุด');
+    const earliest = API_KEYS.reduce((a, b) =>
+        (keyRateLimitUntil[a] || 0) < (keyRateLimitUntil[b] || 0) ? a : b
+    );
+    return earliest;
+}
+
+function markKeyRateLimit(key, retryAfterSec = 60) {
+    keyRateLimitUntil[key] = Date.now() + (retryAfterSec * 1000);
+    console.warn(`⏳ Key ...${key.slice(-6)} ถูก rate limit ${retryAfterSec}s → สลับ key อื่น`);
+}
+
+function getGroqClient() {
+    const key = getNextAvailableKey();
+    return { client: new Groq({ apiKey: key }), key };
 }
 
 const SYSTEM_PROMPT = `
@@ -103,9 +131,10 @@ async function generateChatReply(userMessage, history = [], context = {}) {
 }
 ถ้าลูกค้าไม่ได้สั่งเมนูในข้อความนี้ ให้ ordered_items เป็น []`;
 
-    for (let attempt = 0; attempt < Math.max(API_KEYS.length, 1); attempt++) {
+    const maxAttempts = Math.max(API_KEYS.length, 1);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const { client: groq, key } = getGroqClient();
         try {
-            const groq = getGroqClient();
             const completion = await groq.chat.completions.create({
                 messages: [
                     { role: 'system', content: systemWithMenu },
@@ -128,8 +157,15 @@ async function generateChatReply(userMessage, history = [], context = {}) {
                 orderedItems: Array.isArray(res.ordered_items) ? res.ordered_items : []
             };
         } catch (err) {
-            console.warn(`⚠️ Attempt #${attempt + 1} failed: ${err.message}`);
-            if (attempt < API_KEYS.length - 1) continue;
+            const errBody = err.message || '';
+            // ถ้า rate limit → mark key นี้แล้วสลับ key ถัดไปทันที
+            if (errBody.includes('rate_limit') || errBody.includes('429')) {
+                const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '60');
+                markKeyRateLimit(key, retryAfter);
+            } else {
+                console.warn(`⚠️ Attempt #${attempt + 1} key ...${key.slice(-6)} failed: ${errBody.slice(0, 120)}`);
+            }
+            if (attempt < maxAttempts - 1) continue;
         }
     }
 
