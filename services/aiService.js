@@ -1,22 +1,30 @@
 // ========================================================
-//  services/aiService.js  (v3 - Expert AI Edition - Fixed)
+//  services/aiService.js  (v4 - Robust Edition with Zod)
 // ========================================================
 const { Groq } = require('groq-sdk');
-const { buildMenuText } = require('../menu');
+const { z } = require('zod');
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
-// ระบบ Key Rotation — สลับ key ทันทีเมื่อ error หรือ rate limit
+// --- Schema Validation ---
+const ChatResponseSchema = z.object({
+    sentiment: z.enum(['HAPPY', 'NORMAL', 'FRUSTRATED', 'ANGRY']).default('NORMAL'),
+    reply: z.string().min(1),
+    ordered_items: z.array(z.object({
+        name: z.string(),
+        price: z.number(),
+        qty: z.number().default(1),
+        note: z.string().nullable().default(null)
+    })).default([])
+});
+
+// ระบบ Key Rotation
 const API_KEYS = (process.env.GROQ_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean);
 let currentKeyIndex = 0;
-
-// track เวลา rate limit ของแต่ละ key
 const keyRateLimitUntil = {};
 
 function getNextAvailableKey() {
     if (API_KEYS.length === 0) throw new Error('❌ ไม่พบ GROQ_API_KEYS ใน .env');
     const now = Date.now();
-
-    // หา key ที่ยังไม่ถูก rate limit
     for (let i = 0; i < API_KEYS.length; i++) {
         const idx = (currentKeyIndex + i) % API_KEYS.length;
         const key = API_KEYS[idx];
@@ -25,12 +33,7 @@ function getNextAvailableKey() {
             return key;
         }
     }
-
-    // ทุก key ถูก rate limit → ใช้ key ที่หมด limit เร็วที่สุด
-    console.warn('⚠️ ทุก Groq key ถูก rate limit — ใช้ key ที่หมดเร็วที่สุด');
-    const earliest = API_KEYS.reduce((a, b) =>
-        (keyRateLimitUntil[a] || 0) < (keyRateLimitUntil[b] || 0) ? a : b
-    );
+    const earliest = API_KEYS.reduce((a, b) => (keyRateLimitUntil[a] || 0) < (keyRateLimitUntil[b] || 0) ? a : b);
     return earliest;
 }
 
@@ -48,25 +51,23 @@ const SYSTEM_PROMPT = `
 # [ตัวตน]
 คุณคือ "น้องกาลเวลา" ผู้ดูแลร้าน "กาลเวลา หวนคืน คาเฟ่"
 สไตล์การตอบ: "จริงใจ ตรงไปตรงมา ไม่ขายฝัน"
-คุณไม่ใช่พนักงานที่คอยเอาใจลูกค้าแบบหวานล้อม แต่คุณคือผู้เชี่ยวชาญที่แนะนำสิ่งที่ "ดีที่สุด" และ "คุ้มค่าที่สุด" ให้ลูกค้าตามความเป็นจริง
+คุณคือผู้เชี่ยวชาญที่แนะนำสิ่งที่ "ดีที่สุด" และ "คุ้มค่าที่สุด" ให้ลูกค้าตามความเป็นจริง
 ลงท้ายด้วย "ค่ะ" หรือ "คะ" ตามมารยาท แต่ไม่ต้องใช้คำอวยเยอะ
 
 # [ทัศนคติการแนะนำ — แบบไม่เอาใจ]
-- ถ้าลูกค้าถามว่าอันไหนดี → แนะนำตัวที่ขายดีจริงๆ หรือตัวที่คุณคิดว่าคุ้มค่าที่สุด พร้อมเหตุผลสั้นๆ (เช่น "ถ้าหิวแนะนำอันนี้ค่ะ อิ่มแน่นอน")
-- ไม่ต้องชมทุกเมนูว่าอร่อย → บอกจุดเด่นตามจริง เช่น "อันนี้รสเข้มนะคะ ถ้าชอบหวานต้องสั่งเพิ่มหวาน" หรือ "อันนี้เบาๆ ทานง่ายค่ะ"
-- ตอบกระชับ ไม่อ้อมค้อม ไม่ใช้ Emoji พร่ำเพรื่อ (ใช้เฉพาะที่จำเป็น)
+- ถ้าลูกค้าถามว่าอันไหนดี → แนะนำตัวที่ขายดีจริงๆ หรือตัวที่คุ้มค่าที่สุด พร้อมเหตุผลสั้นๆ
+- ไม่ต้องชมทุกเมนูว่าอร่อย → บอกจุดเด่นตามจริง เช่น "อันนี้รสเข้มนะคะ ถ้าชอบหวานต้องสั่งเพิ่มหวาน"
+- ตอบกระชับ ไม่อ้อมค้อม ไม่ใช้ Emoji พร่ำเพรื่อ
 
 # [บริบทร้าน]
 - ร้านนี้เป็น Delivery อย่างเดียว ไม่มีหน้าร้าน
-- ช่องทางส่ง: Grab, LINE MAN หรือร้านวิ่งส่งเองถ้าใกล้
-- ค่าส่ง: เริ่มต้น 30 บาท / ฟรี 5 กม.แรก
+- ช่องทางส่ง: Grab, LINE MAN หรือร้านวิ่งส่งเองถ้าใกล้ (ฟรี 5 กม. แรก)
 - ชำระเงิน: โอนธนาคาร หรือปลายทาง (เฉพาะพื้นที่ใกล้)
 - เบอร์โทร: 064-087-2920
 
 # [วิธีตอบเมนู]
 - ถามว่า "มีอะไรบ้าง" → แสดงเมนูทุกรายการแบ่งตามหมวด พร้อมราคา ห้ามใช้คำว่า "เช่น"
 - รูปแบบ: "• ชื่อเมนู — ราคา บาท"
-- ถ้าลูกค้าสั่งกาแฟ → แนะนำอาหารคู่ด้วยแบบสั้นๆ เช่น "ทานคู่กับครัวซองต์จะเข้ากันกว่าค่ะ"
 
 # [วิธีสั่ง — ต้องชัดเจนครั้งเดียวจบ]
 เมื่อลูกค้าจะสั่ง ต้องสรุปสิ่งที่เขาต้องทำทันที:
@@ -76,20 +77,10 @@ const SYSTEM_PROMPT = `
 3. เลือกส่ง: Grab / LINE MAN / ร้านส่งเอง
 พิมพ์ทิ้งไว้ได้เลย น้องกาลเวลาจะรีบสรุปยอดให้ค่ะ"
 
-# [ความเข้าใจคำพูดลูกค้า]
-- "ขนม" / "ของกินเล่น" = For Share + ครัวซองต์
-- "อาหาร" / "อาหารเช้า" = breakfast
-- "เครื่องดื่ม" = beverages
-- "เพิ่ม" / "add on" = add-ons
-
-# [เมนูของร้าน — ใช้ข้อมูลนี้เท่านั้น]
+# [เมนูของร้าน]
 MENU_PLACEHOLDER
 `.trim();
 
-/**
- * generateChatReply — ตอบ Inbox พร้อมวิเคราะห์อารมณ์
- */
-// สร้าง prompt พร้อมเมนูแบบกระชับ (ลด token)
 function buildCompactMenu() {
     const { MENU } = require('../menu');
     let t = '[อาหารเช้า]\n';
@@ -116,10 +107,10 @@ async function generateChatReply(userMessage, history = [], context = {}) {
   "sentiment": "HAPPY | NORMAL | FRUSTRATED | ANGRY",
   "reply": "ข้อความตอบกลับสั้น กระชับ อบอุ่น",
   "ordered_items": [
-    { "name": "ชื่อเมนูจาก knowledge base", "price": ราคาตัวเลข, "qty": จำนวน, "note": "หวานน้อย ไม่ใส่น้ำแข็ง หรือ null" }
+    { "name": "ชื่อเมนู", "price": ราคาตัวเลข, "qty": จำนวน, "note": "หวานน้อย/null" }
   ]
 }
-ถ้าลูกค้าไม่ได้สั่งเมนูในข้อความนี้ ให้ ordered_items เป็น []`;
+ถ้าไม่ได้สั่งให้ ordered_items เป็น []`;
 
     const maxAttempts = Math.max(API_KEYS.length, 1);
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -140,20 +131,27 @@ async function generateChatReply(userMessage, history = [], context = {}) {
                 temperature: 0.7,
             });
 
-            const res = JSON.parse(completion.choices[0]?.message?.content || '{}');
+            const rawRes = JSON.parse(completion.choices[0]?.message?.content || '{}');
+            const validated = ChatResponseSchema.safeParse(rawRes);
+            
+            if (!validated.success) {
+                console.warn('⚠️ Validation Failed:', validated.error.format());
+                throw new Error('Invalid AI Format');
+            }
+
+            const res = validated.data;
             return {
-                reply: res.reply || 'น้องกาลเวลาพร้อมดูแลค่ะ รับเมนูไหนดีคะ? ☕',
-                sentiment: res.sentiment || 'NORMAL',
-                orderedItems: Array.isArray(res.ordered_items) ? res.ordered_items : []
+                reply: res.reply,
+                sentiment: res.sentiment,
+                orderedItems: res.ordered_items
             };
         } catch (err) {
             const errBody = err.message || '';
-            // ถ้า rate limit → mark key นี้แล้วสลับ key ถัดไปทันที
             if (errBody.includes('rate_limit') || errBody.includes('429')) {
                 const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '60');
                 markKeyRateLimit(key, retryAfter);
             } else {
-                console.warn(`⚠️ Attempt #${attempt + 1} key ...${key.slice(-6)} failed: ${errBody.slice(0, 120)}`);
+                console.warn(`⚠️ Attempt #${attempt + 1} failed: ${errBody.slice(0, 100)}`);
             }
             if (attempt < maxAttempts - 1) continue;
         }
@@ -161,21 +159,18 @@ async function generateChatReply(userMessage, history = [], context = {}) {
 
     return {
         reply: `ขออภัยนะคะคุณ${userName} น้องกาลเวลาขอไปเตรียมเมนูอร่อยๆ แป๊บนึงนะคะ เดี๋ยวรีบกลับมาดูแลค่ะ 🙏`,
-        sentiment: 'NORMAL'
+        sentiment: 'NORMAL',
+        orderedItems: []
     };
 }
 
-/**
- * generateCommentReply — ตอบคอมเมนต์
- */
 async function generateCommentReply(commentText) {
     const prompt = `คุณคือน้องกาลเวลา จากร้าน กาลเวลา | Huan Khuen Cafe
 มีคนคอมเมนต์ว่า: "${commentText}"
-ตอบสั้นๆ อบอุ่น (1 ประโยค) ชวนให้ทัก Inbox เพื่อดูเมนูครบและราคา ลงท้ายด้วย คะ เท่านั้น
-ห้ามพูดว่า "และอื่นๆ" ห้ามบอกชื่อเมนูในคอมเมนต์ ให้ชวน Inbox อย่างเดียว`;
+ตอบสั้นๆ อบอุ่น (1 ประโยค) ชวนให้ทัก Inbox เพื่อดูเมนู ลงท้ายด้วย คะ เท่านั้น`;
 
     try {
-        const groq = getGroqClient();
+        const { client: groq } = getGroqClient();
         const completion = await groq.chat.completions.create({
             messages: [{ role: 'user', content: prompt }],
             model: 'llama3-8b-8192',

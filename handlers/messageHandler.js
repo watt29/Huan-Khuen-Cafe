@@ -1,20 +1,18 @@
 // ========================================================
-//  handlers/messageHandler.js  (v2)
-//  บทบาท: จัดการข้อความ Messenger (Inbox)
-//  ใช้ In-Memory store แทน SQLite
+//  handlers/messageHandler.js  (v3 - Modular Edition)
+//  บทบาท: Main Entry Point สำหรับจัดการข้อความ Messenger
 // ========================================================
 const { generateChatReply } = require('../services/aiService');
 const { sendMessage, sendQuickReplies, sendTypingIndicator, sendMarkSeen, getUserProfile } = require('../services/facebookService');
-const { getSession, addToCart, getCartSummary, clearCart, saveDelivery, STEPS } = require('../services/sessionService');
-const { hasProcessed, markProcessed } = require('../services/database');
-const { buildCogReport, getHighMarginMenus, MENU } = require('../menu');
-const { logOrderToSheet, logCustomerToSheet } = require('../services/googleSheetService');
+const { getSession, addToCart, clearCart, STEPS } = require('../services/sessionService');
+const { hasProcessed, markProcessed, isHandoff, setHandoff } = require('../services/database');
+const { logCustomerToSheet } = require('../services/googleSheetService');
 const { isMenuRequest, isMenuPayload, sendMenuCategories, handleMenuPayload } = require('./menuHandler');
+const { handleCommand } = require('./commandHandler');
+const { handleDeliveryInfo, handleBillSummary } = require('./orderHandler');
 
-// ประวัติการสนทนาต่อ User (max 10 turns)
+// ประวัติการสนทนาต่อ User (In-Memory สำหรับ History สั้นๆ - ถ้าจะแก้ให้เทพต้องลง DB ด้วย)
 const chatHistories = new Map();
-// User ID ที่โอนให้แอดมินดูแลแทน
-const handoffUsers = new Set();
 
 async function handleMessage(event) {
     const senderId = event.sender?.id;
@@ -22,230 +20,92 @@ async function handleMessage(event) {
     const messageId = event.message?.mid;
     const quickReplyPayload = event.message?.quick_reply?.payload;
 
-    // กรองเงื่อนไขพื้นฐาน
     if (!senderId || !text || event.message?.is_echo) return;
 
-    // ---- [1] ป้องกันตอบซ้ำ ----
+    // 1. ป้องกันตอบซ้ำ
     if (hasProcessed(messageId)) return;
     markProcessed(messageId);
 
-    // ---- [2] Mark Seen (อ่านแล้วอัตโนมัติ) ----
+    // 2. สถานะเบื้องต้น
     await sendMarkSeen(senderId);
 
-    // ---- [2] Admin Slash Commands ----
+    // 3. Admin Commands (/)
     if (text.startsWith('/')) {
-        const cmd = text.toLowerCase();
-
-        if (cmd === '/sync' || cmd === '/syncmenu') {
-            try {
-                const { syncMenuFromSheets } = require('../services/syncService');
-                const ok = await syncMenuFromSheets();
-                await sendMessage(senderId, ok ? '✅ ซิงค์สำเร็จแล้วค่ะ!' : '❌ ซิงค์ขัดข้องค่ะ');
-            } catch {
-                await sendMessage(senderId, '❌ ยังไม่ได้ตั้งค่า syncService ค่ะ');
-            }
-            return;
-        }
-        if (cmd === '/cog') {
-            await sendMessage(senderId, buildCogReport());
-            return;
-        }
-        if (cmd === '/topmenu' || cmd === '/highmargin') {
-            const tops = getHighMarginMenus();
-            let msg = `🏆 เมนู High Margin (กำไร ≥ 50%)\n${'─'.repeat(28)}\n`;
-            tops.forEach(i => { msg += `• ${i.name} — ${i.price}฿ (Margin ${i.margin}%)\n`; });
-            await sendMessage(senderId, msg);
-            return;
-        }
-        if (cmd.startsWith('/cog ')) {
-            const keyword = text.slice(5).toLowerCase().trim();
-            const all = [
-                ...MENU.breakfast, ...MENU.addons,
-                ...MENU.forShare.filter(i => i.price !== null),
-                ...MENU.beverages
-            ];
-            const found = all.filter(i => i.name.toLowerCase().includes(keyword));
-            if (!found.length) {
-                await sendMessage(senderId, `❌ ไม่พบเมนูที่ตรงกับ "${keyword}" ค่ะ`);
-            } else {
-                let msg = `🔍 ผลการค้นหา: "${keyword}"\n`;
-                found.forEach(i => {
-                    const icon = i.margin >= 60 ? '🟢' : i.margin >= 45 ? '🟡' : '🔴';
-                    msg += `\n${icon} ${i.name}\n   ราคา: ${i.price}฿ | COG: ${i.cog}฿ | Margin: ${i.margin}%\n`;
-                });
-                await sendMessage(senderId, msg);
-            }
-            return;
-        }
-        if (cmd === '/pause') {
-            handoffUsers.add(senderId);
-            await sendMessage(senderId, '⏸️ หยุดระบบ AI ชั่วคราว แอดมินเข้าดูแลแทนแล้วค่ะ');
-            return;
-        }
-        if (cmd === '/resume') {
-            handoffUsers.delete(senderId);
-            await sendMessage(senderId, '▶️ เปิดระบบ AI น้องกาลเวลาพร้อมให้บริการแล้วค่ะ');
-            return;
-        }
-        if (cmd === '/clearcart') {
-            clearCart(senderId);
-            await sendMessage(senderId, '🗑️ ล้างตะกร้าเรียบร้อยแล้วค่ะ');
-            return;
-        }
+        const isCmd = await handleCommand(senderId, text);
+        if (isCmd) return;
     }
 
-    // ---- [3] Handoff Mode ----
-    if (handoffUsers.has(senderId)) {
-        console.log(`👤 [HANDOFF] ข้ามการตอบ AI สำหรับ ${senderId}`);
+    // 4. Handoff Check (จาก DB)
+    if (isHandoff(senderId)) {
+        console.log(`👤 [HANDOFF] Active for ${senderId}`);
         return;
     }
 
-    // ---- [3.5] Quick Reply Payload ----
+    // 5. Quick Reply Handlers
     if (quickReplyPayload) {
-        // ปุ่มหมวดเมนู
         if (isMenuPayload(quickReplyPayload)) {
-            await sendTypingIndicator(senderId, 'typing_on');
             await handleMenuPayload(senderId, quickReplyPayload);
-            await sendTypingIndicator(senderId, 'typing_off');
             return;
         }
-
-        // ปุ่มยืนยันออร์เดอร์
         if (quickReplyPayload === 'ORDER_CONFIRM') {
             const s = getSession(senderId);
             s.step = STEPS.DELIVERY;
-            await sendMessage(senderId,
-                `ขอบคุณค่ะ 🙏 รบกวนแจ้งข้อมูลจัดส่งในข้อความเดียวนะคะ\n\n` +
-                `📍 ที่อยู่ / 📞 เบอร์โทร / 🛵 Grab, LINE MAN หรือร้านวิ่งส่ง`
-            );
+            require('../services/sessionService').updateSession(senderId, s);
+            await sendMessage(senderId, `ขอบคุณค่ะ 🙏 รบกวนแจ้งที่อยู่ เบอร์โทร และช่องทางส่ง (Grab/LINE MAN) ได้เลยค่ะ`);
             return;
         }
-
-        // ปุ่มแก้ไขออร์เดอร์
         if (quickReplyPayload === 'ORDER_EDIT') {
             clearCart(senderId);
-            await sendMessage(senderId,
-                `ได้เลยค่ะ ล้างรายการเดิมแล้ว บอกน้องกาลเวลาใหม่ได้เลยนะคะว่าอยากได้อะไรบ้างคะ 😊`
-            );
+            await sendMessage(senderId, `ล้างรายการเดิมแล้ว บอกน้องกาลเวลาใหม่ได้เลยนะคะว่ารับอะไรดีคะ 😊`);
             return;
         }
     }
 
-    console.log(`💬 [CHAT] จาก ${senderId}: "${text}"`);
-
-    // ---- [4] Typing Indicator ----
+    console.log(`💬 [CHAT] ${senderId}: "${text}"`);
     await sendTypingIndicator(senderId, 'typing_on');
 
-    // ---- [5] ดึงชื่อลูกค้า ----
+    // 6. Profile & CRM
     const profile = await getUserProfile(senderId);
     const userName = profile?.first_name || 'คุณลูกค้า';
     const fullName = profile ? `${profile.first_name} ${profile.last_name || ''}`.trim() : 'คุณลูกค้า';
+    logCustomerToSheet({ name: fullName, facebookId: senderId }).catch(() => {});
 
-    // ---- [5.1] บันทึกข้อมูลลูกค้าลง CRM (Google Sheets) ----
-    logCustomerToSheet({
-        name: fullName,
-        facebookId: senderId
-    }).catch(() => {}); // ทำแบบเบลอๆ เบื้องหลัง
-
-    // ---- [6] Keyword Handoff ----
+    // 7. Keyword Escalation
     const handoffKeywords = ['คุยกับคน', 'ขอสายแอดมิน', 'แอดมินอยู่ไหม', 'ติดต่อเจ้าหน้าที่'];
     if (handoffKeywords.some(k => text.includes(k))) {
-        handoffUsers.add(senderId);
-        await sendMessage(senderId,
-            `ได้เลยค่ะคุณ${userName} รอสักครู่นะคะ น้องกาลเวลาขออนุญาตโอนสายให้พี่แอดมินดูแลแทนทันทีเลยค่ะ 😊`
-        );
+        setHandoff(senderId, true);
+        await sendMessage(senderId, `ได้เลยค่ะคุณ${userName} น้องกาลเวลาโอนสายให้พี่แอดมินดูแลแทนทันทีนะคะ 😊`);
         return;
     }
 
-    // ---- [6.5] Menu Request Detection ----
+    // 8. Menu Detection
     if (isMenuRequest(text)) {
-        await sendTypingIndicator(senderId, 'typing_on');
         await sendMenuCategories(senderId, userName);
         await sendTypingIndicator(senderId, 'typing_off');
         return;
     }
 
-    // ---- [7] Cart Detection (ง่ายๆ) ----
-    if (text.includes('สั่ง') || text.includes('เอา') || text.includes('รับ')) {
-        if (text.includes('ชุดใหญ่') || text.toLowerCase().includes('big breakfast')) {
-            addToCart(senderId, { name: 'The Big Breakfast Box Set', price: 329 });
-        }
-    }
-
-    // ---- [8] Delivery Info Collection ----
     const session = getSession(senderId);
 
-    // ถ้าอยู่ใน step DELIVERY → parse ข้อมูลที่อยู่ เบอร์ ช่องทางส่ง
+    // 9. Delivery Step
     if (session.step === STEPS.DELIVERY) {
-        const lower = text.toLowerCase();
-        const method = lower.includes('grab') ? 'Grab' :
-                       lower.includes('line') || lower.includes('ไลน์แมน') ? 'LINE MAN' :
-                       lower.includes('วิ่ง') || lower.includes('ร้านส่ง') || lower.includes('เอง') ? 'ร้านวิ่งส่ง' : null;
-
-        const phoneMatch = text.match(/0[0-9]{8,9}/);
-        const phone = phoneMatch ? phoneMatch[0] : null;
-
-        // ตัดเบอร์และ keyword ออก เหลือที่อยู่
-        let address = text
-            .replace(/0[0-9]{8,9}/g, '')
-            .replace(/(grab|lineman|ไลน์แมน|line man|วิ่งส่ง|ร้านส่ง|ร้านวิ่ง)/gi, '')
-            .replace(/\s+/g, ' ').trim();
-
-        saveDelivery(senderId, {
-            address: address || null,
-            phone: phone || null,
-            method: method || 'รอยืนยัน'
-        });
-
-        const summary = getCartSummary(senderId);
-        const delivery = getSession(senderId).delivery;
-
-        // log ลง Sheets พร้อมข้อมูลจัดส่งครบ
-        logOrderToSheet({
-            customerName: fullName,
-            orderItems: summary ? summary.lines.join(', ') : '-',
-            totalPrice: summary ? summary.total : '-',
-            paymentMethod: 'รอแจ้งโอน',
-            deliveryAddress: delivery.address || '-',
-            deliveryPhone: delivery.phone || '-',
-            deliveryMethod: delivery.method || '-'
-        }).catch(console.error);
-
-        await sendMessage(senderId,
-            `✅ รับทราบค่ะคุณ${userName}!\n\n` +
-            `📦 ที่อยู่: ${delivery.address || 'รอยืนยัน'}\n` +
-            `📞 เบอร์: ${delivery.phone || 'รอยืนยัน'}\n` +
-            `🛵 ส่งผ่าน: ${delivery.method}\n\n` +
-            `${summary ? `💰 ยอดรวม: ${summary.total} บาท\n\n` : ''}` +
-            `น้องกาลเวลาจะรีบเตรียมออร์เดอร์ให้เลยค่ะ 🙏`
-        );
+        await handleDeliveryInfo(senderId, text, userName, fullName);
+        await sendTypingIndicator(senderId, 'typing_off');
         return;
     }
 
-    // ---- [8.1] Bill Summary → ทวนออร์เดอร์ + Quick Reply ยืนยัน ----
+    // 10. Bill Summary
     if (text.includes('สรุป') || text.includes('ยอด') || text.includes('เช็คบิล')) {
-        const summary = getCartSummary(senderId);
-        if (summary) {
-            await sendQuickReplies(
-                senderId,
-                `🧾 ทวนออร์เดอร์ของคุณ${userName} นะคะ\n\n${summary.lines.join('\n')}\n\n💰 รวม ${summary.total} บาท\n\nถูกต้องไหมคะ?`,
-                [
-                    { title: '✅ ยืนยัน', payload: 'ORDER_CONFIRM' },
-                    { title: '❌ แก้ไข',  payload: 'ORDER_EDIT' }
-                ]
-            );
-            return;
-        } else {
-            await sendMessage(senderId, `ยังไม่มีรายการออร์เดอร์นะคะคุณ${userName} บอกน้องกาลเวลาได้เลยว่าอยากได้เมนูอะไรคะ 😊`);
-            return;
-        }
+        await handleBillSummary(senderId, userName);
+        await sendTypingIndicator(senderId, 'typing_off');
+        return;
     }
 
-    // ---- [9] AI Reply (Groq) ----
+    // 11. AI Generation (Groq)
     const history = chatHistories.get(senderId) || [];
     const { reply, sentiment, orderedItems } = await generateChatReply(text, history, { userName });
 
-    // ---- [9.1] บันทึก cart จาก AI ----
+    // 12. Update Cart from AI
     if (orderedItems && orderedItems.length > 0) {
         orderedItems.forEach(item => {
             addToCart(senderId, {
@@ -254,30 +114,23 @@ async function handleMessage(event) {
                 qty: item.qty || 1
             });
         });
-        console.log(`🛒 [CART] ${fullName}: ${orderedItems.map(i => i.name).join(', ')}`);
     }
 
-    // ---- [10] Sentiment Auto-Escalation ----
+    // 13. Sentiment Escalation
     if (sentiment === 'ANGRY' || sentiment === 'FRUSTRATED') {
-        console.log(`⚠️ [ESCALATION] ลูกค้า ${senderId} sentiment=${sentiment}`);
-        handoffUsers.add(senderId);
-        await sendMessage(senderId,
-            `${reply}\n\n(แอดมินกำลังรีบเข้ามาดูแลคุณ${userName} โดยด่วนนะคะ ขออภัยในความไม่สะดวกด้วยค่ะ 🙏)`
-        );
+        setHandoff(senderId, true);
+        await sendMessage(senderId, `${reply}\n\n(แอดมินกำลังรีบเข้ามาดูแลคุณ${userName} นะคะ 🙏)`);
         return;
     }
 
-    // ---- [11] บันทึก History ----
+    // 14. History & Sending
     history.push({ role: 'user', parts: [{ text }] });
     history.push({ role: 'model', parts: [{ text: reply }] });
-    if (history.length > 20) history.splice(0, 2); // เก็บแค่ 10 turns ล่าสุด
+    if (history.length > 20) history.splice(0, 2);
     chatHistories.set(senderId, history);
 
-    // ---- [12] ส่งคำตอบ (หน่วงนิดหน่อยให้เนียน) ----
     await sendTypingIndicator(senderId, 'typing_off');
-    setTimeout(async () => {
-        await sendMessage(senderId, reply);
-    }, 1000);
+    setTimeout(() => sendMessage(senderId, reply), 500);
 }
 
 module.exports = { handleMessage };
