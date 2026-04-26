@@ -5,9 +5,15 @@
 
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-// เชื่อมต่อ DB (จะสร้างไฟล์ถ้ายังไม่มี)
-const dbPath = path.join(__dirname, '../data/database.db');
+// เชื่อมต่อ DB (สร้างโฟลเดอร์ถ้ายังไม่มี)
+const dbDir = path.join(__dirname, '../data');
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+}
+
+const dbPath = path.join(dbDir, 'database.db');
 const db = new Database(dbPath);
 
 // --- Initialization: สร้าง Table ถ้ายังไม่มี ---
