@@ -82,4 +82,4 @@ function markProcessed(id) {
     }
 }
 
-module.exports = { db, hasProcessed, markProcessed };
+module.exports = { db, hasProcessed, markProcessed, setHandoff, isHandoff };
